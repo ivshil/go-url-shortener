@@ -1,0 +1,39 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:latest
+    container_name: postgres_url_short
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: url_short
+      POSTGRES_DB: postgres_url_short_db
+    volumes:
+      - /home/glarus/Tester/docker-volumes/url-short-go-postgres:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  adminer:
+    image: adminer
+    container_name: my_adminer_url_short
+    restart: unless-stopped
+    ports:
+      - "8000:8080"
+
+  go_app:
+    image: golang:latest
+    container_name: go_url_short
+    build:
+      context: .
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL: postgres://admin:url_short@postgres/postgres_url_short_db
+    ports:
+      - "1337:1337"
+#volumes:
+  # Comment out the pg_data named volume since we are using a bind mount.
+#  pg_data:
+   # external: true
