@@ -1,24 +1,17 @@
-# Use the official Go image as the base image
-FROM golang:latest
+FROM golang:1.20.5
 
-# Set the working directory inside the container
 WORKDIR /app
 
-# Copy the Go source code into the container
 COPY . .
 
-# Build the Go app inside the container
 RUN go build -o main .
 
-# Expose the port on which the Go app will listen
-EXPOSE 1337
+EXPOSE $GOAPP_PORT
 
-# Set environment variables for the PostgreSQL connection
-ENV PGHOST=postgres
-ENV PGPORT=5432
-ENV PGUSER=admin
-ENV PGPASSWORD=url_short
-ENV PGDATABASE=postgres_url_short_db
+ENV PGDB_HOST=$PGDB_HOST
+ENV PGDB_PORT=$PGDB_PORT
+ENV PGDB_USER=$PGDB_USER
+ENV PGDB_PASS=$PGDB_PASS
+ENV PGDB_NAME=$PGDB_NAME
 
-# Run the Go app
 CMD ["./main"]

@@ -6,29 +6,29 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
+	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
 
-// Database connection parameters
-const (
-	dbHost = "postgres"
-	dbPort = 5432
-	dbUser = "admin"
-	dbPass = "url_short"
-	dbName = "postgres_url_short_db"
+var (
+	dbHost    = ""
+	dbPort    = ""
+	dbUser    = ""
+	dbPass    = ""
+	dbName    = ""
+	goAppPort = ""
 )
 
-// User represents the User table data
 type User struct {
 	ID        int       `json:"user_id"`
-	Name      string    `json:"usre_name"`
+	Name      string    `json:"user_name"`
 	Email     string    `json:"user_email"`
 	BirthDate time.Time `json:"user_bdate"`
 }
 
-// Task represents the Tasks table data
 type Task struct {
 	ID            int       `json:"task_id"`
 	UserCreatorID int       `json:"user_creator_id"`
@@ -37,7 +37,6 @@ type Task struct {
 	DeadlineDate  time.Time `json:"task_deadline_date"`
 }
 
-// TaskContributor represents the TasksContributors table data
 type TaskContributor struct {
 	ID           int       `json:"task_con_id"`
 	UserID       int       `json:"user_id"`
@@ -54,14 +53,37 @@ type URLShort struct {
 }
 
 func main() {
-	// Initialize database connection
+	// Load .env
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatalf("Error loading .env file: %v", err)
+	}
+	dbHost = os.Getenv("PGDB_HOST")
+	dbPort = os.Getenv("PGDB_PORT")
+	dbUser = os.Getenv("PGDB_USER")
+	dbPass = os.Getenv("PGDB_PASS")
+	dbName = os.Getenv("PGDB_NAME")
+	goAppPort = os.Getenv("GOAPP_PORT")
+
 	db, err := openDB()
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer db.Close()
 
-	// Define HTTP handlers
+	// check env variables
+	// http.HandleFunc("/db/info", func(w http.ResponseWriter, r *http.Request) {
+	// 	if r.Method == http.MethodGet {
+	// 		message := fmt.Sprintf("DB Host: %s\nDB Port: %s\nDB User: %s\nDB Password: %s\nDB Name: %s\n", dbHost, dbPort, dbUser, dbPass, dbName)
+	// 		fmt.Println(message)
+	// 		w.Header().Set("Content-Type", "text/plain")
+	// 		w.WriteHeader(http.StatusOK)
+	// 		w.Write([]byte(message))
+	// 	} else {
+	// 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	// 	}
+	// })
+
 	http.HandleFunc("/users", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -98,14 +120,13 @@ func main() {
 	})
 
 	// Start the HTTP server
-	port := "1337" // Change this to the desired port
-	log.Printf("Server listening on port %s...\n", port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	log.Printf("Server listening on port %s...\n", goAppPort)
+	log.Fatal(http.ListenAndServe(":"+goAppPort, nil))
 }
 
 // openDB opens a connection to the PostgreSQL database
 func openDB() (*sql.DB, error) {
-	connStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable", dbHost, dbPort, dbUser, dbPass, dbName)
+	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable", dbHost, dbPort, dbUser, dbPass, dbName)
 	return sql.Open("postgres", connStr)
 }
 
@@ -150,7 +171,7 @@ func addUserHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		return
 	}
 
-	query := "INSERT INTO users (name, email, birthdate) VALUES ($1, $2, $3) RETURNING user_id"
+	query := "INSERT INTO users (user_name, user_email, user_bdate) VALUES ($1, $2, $3) RETURNING user_id"
 	err := db.QueryRow(query, user.Name, user.Email, user.BirthDate).Scan(&user.ID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error inserting user into database: %v", err), http.StatusInternalServerError)
@@ -184,7 +205,6 @@ func getUrlShortsHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		urlShorts = append(urlShorts, urlShort)
 	}
 
-	// Convert users slice to JSON and write the response
 	w.Header().Set("Content-Type", "application/json")
 	err = json.NewEncoder(w).Encode(urlShorts)
 	if err != nil {
@@ -193,7 +213,6 @@ func getUrlShortsHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	}
 }
 
-// getTasksHandler retrieves all tasks from the Tasks table and returns them as a JSON response
 func getTasksHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	rows, err := db.Query("SELECT * FROM tasks")
 	if err != nil {
@@ -213,7 +232,6 @@ func getTasksHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		tasks = append(tasks, task)
 	}
 
-	// Convert tasks slice to JSON and write the response
 	w.Header().Set("Content-Type", "application/json")
 	err = json.NewEncoder(w).Encode(tasks)
 	if err != nil {
@@ -222,7 +240,6 @@ func getTasksHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	}
 }
 
-// getTaskContributorsHandler retrieves all task contributors from the TasksContributors table and returns them as a JSON response
 func getTaskContributorsHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	rows, err := db.Query("SELECT * FROM tasks_contributors")
 	if err != nil {
@@ -242,7 +259,6 @@ func getTaskContributorsHandler(w http.ResponseWriter, r *http.Request, db *sql.
 		taskContributors = append(taskContributors, contributor)
 	}
 
-	// Convert task contributors slice to JSON and write the response
 	w.Header().Set("Content-Type", "application/json")
 	err = json.NewEncoder(w).Encode(taskContributors)
 	if err != nil {
