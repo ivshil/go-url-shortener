@@ -1,0 +1,43 @@
+version: '3.9'
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: postgres_url_short
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      POSTGRES_HOST: ${PGDB_HOST}
+      POSTGRES_PORT: ${PGDB_PORT}
+      POSTGRES_USER: ${PGDB_USER}
+      POSTGRES_PASSWORD: ${PGDB_PASS}
+      POSTGRES_DB: ${PGDB_NAME}
+    volumes:
+      - /home/glarus/Tester/docker-volumes/url-short-go-postgres:/var/lib/postgresql/data
+    ports:
+      - "${PGDB_PORT}:${PGDB_PORT}"
+
+  adminer:
+    image: adminer
+    container_name: adminer_url_short
+    restart: unless-stopped
+    ports:
+      - ${ADM_PORT}
+
+  go_app:
+    image: golang:1.20.5
+    container_name: go_url_short
+    build:
+      context: .
+      args:
+        PGDB_HOST: ${PGDB_HOST}
+        PGDB_PORT: ${PGDB_PORT}
+        PGDB_USER: ${PGDB_USER}
+        PGDB_PASS: ${PGDB_PASS}
+        PGDB_NAME: ${PGDB_NAME}
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    env_file: .env
+    ports:
+      - "${GOAPP_PORT}:${GOAPP_PORT}"

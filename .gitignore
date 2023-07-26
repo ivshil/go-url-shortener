@@ -1,0 +1,8 @@
+.env
+cmd/
+config/
+internal/
+migrations/
+pkg/
+.vscode/
+main
