@@ -2,11 +2,16 @@ package main
 
 import (
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/rand"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
+	"text/template"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -22,26 +27,55 @@ var (
 	goAppPort = ""
 )
 
+var letters = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+
+type CustomDate time.Time
+
+func (cd *CustomDate) UnmarshalJSON(data []byte) error {
+	layout := "2006-01-02"
+	parsedTime, err := time.Parse(`"`+layout+`"`, string(data))
+	if err != nil {
+		return err
+	}
+
+	*cd = CustomDate(parsedTime)
+	return nil
+}
+
+func (cd CustomDate) String() string {
+	return time.Time(cd).Format("2006-01-02")
+}
+
+func (cd CustomDate) Value() (driver.Value, error) {
+	return time.Time(cd), nil
+}
+
+func (cd CustomDate) MarshalJSON() ([]byte, error) {
+	t := time.Time(cd)
+	formattedDate := t.Format("2006-01-02")
+	return json.Marshal(formattedDate)
+}
+
 type User struct {
-	ID        int       `json:"user_id"`
-	Name      string    `json:"user_name"`
-	Email     string    `json:"user_email"`
-	BirthDate time.Time `json:"user_bdate"`
+	ID        int        `json:"user_id"`
+	Name      string     `json:"user_name"`
+	Email     string     `json:"user_email"`
+	BirthDate CustomDate `json:"user_bdate"`
 }
 
 type Task struct {
-	ID            int       `json:"task_id"`
-	UserCreatorID int       `json:"user_creator_id"`
-	Description   string    `json:"task_description"`
-	StartDate     time.Time `json:"task_start_date"`
-	DeadlineDate  time.Time `json:"task_deadline_date"`
+	ID            int        `json:"task_id"`
+	UserCreatorID int        `json:"user_creator_id"`
+	Description   string     `json:"task_description"`
+	StartDate     CustomDate `json:"task_start_date"`
+	DeadlineDate  CustomDate `json:"task_deadline_date"`
 }
 
 type TaskContributor struct {
-	ID           int       `json:"task_con_id"`
-	UserID       int       `json:"user_id"`
-	TaskID       int       `json:"task_id"`
-	DateAssigned time.Time `json:"assigned_date"`
+	ID           int        `json:"task_con_id"`
+	UserID       int        `json:"user_id"`
+	TaskID       int        `json:"task_id"`
+	DateAssigned CustomDate `json:"assigned_date"`
 }
 
 type URLShort struct {
@@ -71,18 +105,9 @@ func main() {
 	}
 	defer db.Close()
 
-	// check env variables
-	// http.HandleFunc("/db/info", func(w http.ResponseWriter, r *http.Request) {
-	// 	if r.Method == http.MethodGet {
-	// 		message := fmt.Sprintf("DB Host: %s\nDB Port: %s\nDB User: %s\nDB Password: %s\nDB Name: %s\n", dbHost, dbPort, dbUser, dbPass, dbName)
-	// 		fmt.Println(message)
-	// 		w.Header().Set("Content-Type", "text/plain")
-	// 		w.WriteHeader(http.StatusOK)
-	// 		w.Write([]byte(message))
-	// 	} else {
-	// 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-	// 	}
-	// })
+	http.HandleFunc("/url", urlFormHandler)
+	http.HandleFunc("/submit-url", submitURLHandler(db))
+	http.HandleFunc("/s/", shortenedURLHandler(db))
 
 	http.HandleFunc("/users", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -119,18 +144,15 @@ func main() {
 		}
 	})
 
-	// Start the HTTP server
 	log.Printf("Server listening on port %s...\n", goAppPort)
 	log.Fatal(http.ListenAndServe(":"+goAppPort, nil))
 }
 
-// openDB opens a connection to the PostgreSQL database
 func openDB() (*sql.DB, error) {
 	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable", dbHost, dbPort, dbUser, dbPass, dbName)
 	return sql.Open("postgres", connStr)
 }
 
-// getUsersHandler retrieves all users from the Users table and returns them as a JSON response
 func getUsersHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	rows, err := db.Query("SELECT * FROM users")
 	if err != nil {
@@ -172,6 +194,7 @@ func addUserHandler(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	}
 
 	query := "INSERT INTO users (user_name, user_email, user_bdate) VALUES ($1, $2, $3) RETURNING user_id"
+	fmt.Printf(query, user.Name, user.Email, user.BirthDate)
 	err := db.QueryRow(query, user.Name, user.Email, user.BirthDate).Scan(&user.ID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error inserting user into database: %v", err), http.StatusInternalServerError)
@@ -264,5 +287,96 @@ func getTaskContributorsHandler(w http.ResponseWriter, r *http.Request, db *sql.
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Error encoding task contributors to JSON: %v", err), http.StatusInternalServerError)
 		return
+	}
+}
+
+// URL Funcs
+
+func urlFormHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		tmpl := template.Must(template.ParseFiles("url.html"))
+		tmpl.Execute(w, nil)
+	} else {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func submitURLHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			r.ParseForm()
+			urlInput := r.Form.Get("url")
+
+			if !isValidURL(urlInput) {
+				http.Error(w, "Invalid URL format", http.StatusBadRequest)
+				return
+			}
+
+			urls := generateRandomString(5)
+
+			for isURLSExists(db, urls) {
+				urls = generateRandomString(5)
+			}
+
+			created := time.Now()
+
+			query := "INSERT INTO url_shorts (url_base, url_short, url_created_date) VALUES ($1, $2, $3) RETURNING url_short_id"
+			var urlID int
+			err := db.QueryRow(query, urlInput, urls, created).Scan(&urlID)
+			if err != nil {
+				http.Error(w, fmt.Sprintf("Error inserting URL into database: %v", err), http.StatusInternalServerError)
+				return
+			}
+
+			shortenedURL := fmt.Sprintf("http://localhost:1337/s/%s", urls)
+			fmt.Fprintf(w, "Shortened URL: %s", shortenedURL)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	}
+}
+
+func isValidURL(urlStr string) bool {
+	_, err := url.ParseRequestURI(urlStr)
+	if err != nil {
+		return false
+	}
+	if !strings.HasPrefix(urlStr, "http://") && !strings.HasPrefix(urlStr, "https://") {
+		return false
+	}
+	return true
+}
+
+func generateRandomString(length int) string {
+	b := make([]rune, length)
+	for i := range b {
+		b[i] = letters[rand.Intn(len(letters))]
+	}
+	return string(b)
+}
+
+func isURLSExists(db *sql.DB, urls string) bool {
+	query := "SELECT COUNT(*) FROM url_shorts WHERE url_short = $1"
+	var count int
+	err := db.QueryRow(query, urls).Scan(&count)
+	if err != nil {
+		return false
+	}
+	return count > 0
+}
+
+func shortenedURLHandler(db *sql.DB) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		urls := strings.TrimPrefix(r.URL.Path, "/s/")
+
+		query := "SELECT url_base FROM url_shorts WHERE url_short = $1"
+		var urlBase string
+		err := db.QueryRow(query, urls).Scan(&urlBase)
+		if err != nil {
+			http.Error(w, "Shortened URL not found", http.StatusNotFound)
+			return
+		}
+
+		http.Redirect(w, r, urlBase, http.StatusFound)
 	}
 }

@@ -1,1 +1,2 @@
-Go application running on docker container with postgres db 
+# URL Shortener written in GoLang running on docker containers with postgres db 
+
